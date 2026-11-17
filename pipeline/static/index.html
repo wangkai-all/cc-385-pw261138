@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rule pipeline upgrade console</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <h1>Rule pipeline · upgrade console</h1>
+    <p class="sub">v1 checkpoint → v2 state, with crash-safe conversion and replay</p>
+  </div>
+  <div class="topbar-actions">
+    <button id="refresh" class="btn">Refresh</button>
+    <button id="reset" class="btn danger">Reseed demo data</button>
+  </div>
+</header>
+
+<main>
+  <section class="cards" id="cards"></section>
+
+  <div class="grid">
+    <section class="panel" id="checkpoint-panel">
+      <h2>Checkpoint / worker readiness</h2>
+      <div id="checkpoint-body" class="mono small"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Processes</h2>
+      <div class="row">
+        <label>batch <input id="worker-batch" type="number" value="6" min="1" max="100"></label>
+        <button id="worker-step" class="btn">Run worker step</button>
+      </div>
+      <div class="row">
+        <label>crash at
+          <select id="worker-crash">
+            <option value="none">none</option>
+            <option value="before_write">before_write</option>
+            <option value="after_write">after_write</option>
+            <option value="before_replace">before_replace</option>
+            <option value="after_replace">after_replace</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <button id="publisher-step" class="btn">Publish results</button>
+        <button id="publisher-crash" class="btn warn">Publish, die before ack</button>
+      </div>
+      <div class="row">
+        <form id="ingest-form" class="inline">
+          <input id="ingest-account" placeholder="account" value="alpha" size="8">
+          <input id="ingest-amount" placeholder="amount" type="number" value="450" size="6">
+          <button class="btn" type="submit">Ingest event</button>
+        </form>
+      </div>
+      <div class="row">
+        <form id="reverse-form" class="inline">
+          <input id="reverse-id" placeholder="event id to reverse" size="14">
+          <button class="btn" type="submit">Ingest reversal</button>
+        </form>
+      </div>
+      <p class="hint">Ingesting while an upgrade preview is open is the point: the ingester keeps appending offsets the old rule never saw.</p>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Upgrade</h2>
+      <div class="row">
+        <label>source
+          <select id="upgrade-mode">
+            <option value="auto">convert v1 checkpoint</option>
+            <option value="replay">replay log up to offset</option>
+          </select>
+        </label>
+        <label>replay offset <input id="replay-offset" type="number" min="0" value="12"></label>
+        <button id="preview" class="btn primary">Preview upgrade</button>
+      </div>
+    </div>
+    <div id="upgrade-body"><p class="hint">No preview yet. Preview is side-effect free: it computes the converted checkpoint, the field diff and the (suppressed) history contributions.</p></div>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Input log</h2>
+      <div id="events" class="scroll mono small"></div>
+    </section>
+    <section class="panel">
+      <h2>Results ledger</h2>
+      <div id="ledger" class="scroll mono small"></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Runs</h2>
+    <div id="runs" class="mono small"></div>
+  </section>
+
+  <section class="panel">
+    <h2>How a run is checked</h2>
+    <ol class="small">
+      <li><b>Preview</b> computes the converted checkpoint, its digest, the field-by-field diff and the v2 contributions that are <i>suppressed</i> because v1 already settled those offsets. It writes only the run record.</li>
+      <li><b>Commit</b> writes the checkpoint through tmp → fsync → rename, with an optional crash before/after those steps, then verifies that the log prefix replays to exactly the previewed state.</li>
+      <li><b>Recover</b> is idempotent: if the swap did not land it reapplies the preview; if it did it reports <code>already_committed</code>; if newer progress exists it refuses.</li>
+      <li><b>Independence</b>: the ingester keeps appending while preview/commit/crash run. The worker refuses a v1 checkpoint; the publisher dedupes on <code>(rule, offset, index)</code> so retries never double-count.</li>
+    </ol>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<dialog id="diff-dialog">
+  <form method="dialog"><button class="btn">Close</button></form>
+  <div id="diff-body"></div>
+</dialog>
+<script src="/app.js"></script>
+</body>
+</html>
